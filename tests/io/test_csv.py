@@ -144,6 +144,52 @@ def test_dataset_to_csv(csv_path, tmp_path):
         assert row1 == row2
 
 
+def test_dataset_to_csv_encoding(tmp_path):
+    dataset = Dataset.from_dict({"text": ["café", "naïve"]})
+    output_csv = tmp_path / "output.csv"
+
+    dataset.to_csv(output_csv, encoding="latin-1")
+
+    content = output_csv.read_bytes().decode("latin-1")
+    assert "café" in content
+    assert "naïve" in content
+
+
+def test_dataset_to_csv_encoding_errors_replace(tmp_path):
+    dataset = Dataset.from_dict({"text": ["café", "hello 😀"]})
+    output_csv = tmp_path / "output.csv"
+
+    dataset.to_csv(output_csv, encoding="latin-1", errors="replace")
+
+    content = output_csv.read_bytes().decode("latin-1")
+    assert "café" in content
+    assert "hello ?" in content
+
+
+def test_dataset_to_csv_empty_utf16(tmp_path):
+    dataset = Dataset.from_dict({"text": []})
+    output_csv = tmp_path / "empty.csv"
+
+    dataset.to_csv(output_csv, encoding="utf-16")
+
+    assert output_csv.read_bytes() == b""
+
+
+@pytest.mark.parametrize("num_proc", [1, 2])
+def test_dataset_to_csv_utf16_single_bom(tmp_path, num_proc):
+    dataset = Dataset.from_dict({"text": ["hello", "world"]})
+    output_csv = tmp_path / "output.csv"
+
+    dataset.to_csv(output_csv, encoding="utf-16", batch_size=1, num_proc=num_proc)
+
+    content = output_csv.read_bytes()
+    decoded = content.decode("utf-16")
+
+    assert decoded.count("\ufeff") == 0
+    assert "hello" in decoded
+    assert "world" in decoded
+
+
 def test_dataset_to_csv_multiproc(csv_path, tmp_path):
     cache_dir = tmp_path / "cache"
     output_csv = os.path.join(cache_dir, "tmp.csv")

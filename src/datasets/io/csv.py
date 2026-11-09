@@ -1,3 +1,4 @@
+import codecs
 import multiprocessing
 import os
 from typing import BinaryIO, Optional, Union
@@ -81,7 +82,8 @@ class CsvDatasetWriter:
         self.path_or_buf = path_or_buf
         self.batch_size = batch_size if batch_size else config.DEFAULT_MAX_BATCH_SIZE
         self.num_proc = num_proc
-        self.encoding = "utf-8"
+        self.encoding = to_csv_kwargs.pop("encoding", "utf-8")
+        self.errors = to_csv_kwargs.pop("errors", "strict")
         self.storage_options = storage_options or {}
         self.to_csv_kwargs = to_csv_kwargs
 
@@ -108,7 +110,7 @@ class CsvDatasetWriter:
         csv_str = batch.to_pandas(integer_object_nulls=True).to_csv(
             path_or_buf=None, header=header if (offset == 0) else False, index=index, **to_csv_kwargs
         )
-        return csv_str.encode(self.encoding)
+        return csv_str
 
     def _write(self, file_obj: BinaryIO, header, index, **to_csv_kwargs) -> int:
         """Writes the pyarrow table as CSV to a binary file handle.
@@ -116,6 +118,8 @@ class CsvDatasetWriter:
         Caller is responsible for opening and closing the handle.
         """
         written = 0
+        has_batches = False
+        encoder = codecs.getincrementalencoder(self.encoding)(errors=self.errors)
 
         if self.num_proc is None or self.num_proc == 1:
             for offset in hf_tqdm(
@@ -124,7 +128,8 @@ class CsvDatasetWriter:
                 desc="Creating CSV from Arrow format",
             ):
                 csv_str = self._batch_csv((offset, header, index, to_csv_kwargs))
-                written += file_obj.write(csv_str)
+                written += file_obj.write(encoder.encode(csv_str))
+                has_batches = True
 
         else:
             num_rows, batch_size = len(self.dataset), self.batch_size
@@ -138,6 +143,10 @@ class CsvDatasetWriter:
                     unit="ba",
                     desc="Creating CSV from Arrow format",
                 ):
-                    written += file_obj.write(csv_str)
+                    written += file_obj.write(encoder.encode(csv_str))
+                    has_batches = True
+
+        if has_batches:
+            written += file_obj.write(encoder.encode("", final=True))
 
         return written
